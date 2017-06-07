@@ -12,22 +12,24 @@
 
 using namespace std;
 
+// Atom structure
 typedef struct atom {
-    string name;
-    string res;
-    double x;
+    string name;    //H11, C3, etc
+    string res;     //Residue name
+    double x;       
     double y;
     double z;
 } atom;
 
+// Statistic data structure
 typedef struct stat {
-    int n;
-    double d_sum;
-    double d_avg;
-    double sd;
+    int n;          
+    double d_sum;   //Overal sum   
+    double d_avg;   //Average over all data
+    double sd;      //Standard Deviation
     string res;
     vector<double> data;
-    stat() {
+    stat() {    //constructor
         n=0;
         d_sum=0;
         d_avg=0;
@@ -36,58 +38,58 @@ typedef struct stat {
     }
 } stat;
 
-// trim from end
+// Trim word tail
 static inline std::string &rtrim(std::string &s) {
-        s.erase(std::find_if(s.rbegin(), s.rend(),
-                    std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
-            return s;
+    s.erase(std::find_if(s.rbegin(), s.rend(),
+        std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+    return s;
 }
 
-
+// Shortest distance between two points on 3-dimensional space
 double dist(atom A, atom B){
     double d = sqrt((A.x-B.x)*(A.x-B.x)+(A.y-B.y)*(A.y-B.y)+(A.z-B.z)*(A.z-B.z));
     return d;
 }
 
+//Print basic help with usage samples
 void print_help(){
-    printf("USAGE\n    ./hydrogen-dist file.pdb [options]\n\n");
-    printf("EXAMPLE\n    ./hydrogen-dist file.pdb             Calcula distancias de todos os frames \n");
-    printf("    ./hydrogen-dist file.pdb -b 1 -e 10  Apenas do frame 1 ao 10 \n");
-    printf("    ./hydrogen-dist file.pdb -d 5        Salva apenas distancias menores que 5 \n");
-    printf("    ./hydrogen-dist file.pdb --average-only   Salva apenas um arquivo com as médias sobre todos\n");
-    printf("                                              os frames com os respectivos desvios padrão.\n");
+    printf("USAGE\n    hydrogen-dist file.pdb [options]\n\n");
+    printf("EXAMPLE\n    hydrogen-dist file.pdb             Calcula distancias de todos os frames \n");
+    printf("    hydrogen-dist file.pdb -b 1 -e 10  Apenas do frame 1 ao 10 \n");
+    printf("    hydrogen-dist file.pdb -d 5        Salva apenas distancias menores que 5 \n");
+    printf("    hydrogen-dist file.pdb --all       Salva apenas um arquivo com as médias sobre todos\n");
+    printf("                                       os frames com os respectivos desvios padrão.\n");
 }
 
 int main(int argc, char *argv[]){
-    vector< vector< atom > > atoms;
-    vector< atom > bcd;
-    vector< vector< vector< vector< double > > > > statistics;
+    bool first_frame=true, all=false;
+    int reference_count=0, frames=0;
+    double t, max_dist=-1, begin=-1, end=-1;
+    char * input_name, * fname_groups;
+    string fname_prefix, line_string="", gline_string, reference_name;
+    ifstream input, groupsf; 
+    vector< int > other_count;  //Count each residues atoms
+    vector< atom > reference;   //Atoms of reference molecule
+    vector< vector< atom > > atoms;     
+    vector< vector< vector< vector< double > > > > distances;
     map< string, int > rn;
-    map< string, map< string, int > > tipos;
+    map< string, map< string, int > > types;
     map< string, map< string, string > > groups;
     map< string, map< string, map < string, stat > > > groups_stats;
-    double t, max_dist=-1, begin=-1, end=-1;
-    int bcd_count=0, frames=0;
-    vector<int> other_count;
-    bool first_run=true, avg_only=false;
-    ifstream input, groupsf; 
-    char * input_name, * fname_groups;
-    string fname_prefix, line_string="", gline_string;
-
-    //for (int i=0; i<argc; i++) printf("%s\n", argv[i]);
 
     if (argc<2){
         print_help();
         return 1;
     }
-
-    //Arguments read
+    
+    //-----------------------------------------------------------------------------
+    // Arguments read
+    //-----------------------------------------------------------------------------
     for (int i=1; i<argc; i++){
         if (argv[i][0]=='-') {
-            // -d 5.0 ou --max-dist 5.0
+            // -d 5.0 or --max-dist 5.0 -> maximum distance to consider
             if (!strcmp(argv[i],"--max-dist") || !strcmp(argv[i], "-d")) {
                 if (argc>i+1){
-                    //max_dist=stof(string(argv[++i]));
                     stringstream ss(string(argv[++i]));
                     ss >> max_dist;
                 }
@@ -96,28 +98,28 @@ int main(int argc, char *argv[]){
                     return 1;
                 }
             } else
-            if (!strcmp(argv[i],"--average-only")) {
-                avg_only=true;
+            if (!strcmp(argv[i],"--all")) {
+                all=true;
             } else
-            // -b 2
+            // -b 2 -> first frame
             if (!strcmp(argv[i],"-b")) {
                 if (argc>i+1){
-                    //begin=stof(string(argv[++i]));
                     stringstream ss(string(argv[++i]));
                     ss >> begin;
                 }
             } else
-            // -e 100
+            // -e 100 -> last frame
             if (!strcmp(argv[i],"-e")) {
                 if (argc>i+1) {
-                    //end=stof(string(argv[++i]));
                     stringstream ss(string(argv[++i]));
                     ss >> end;
                 }
             } else
+            // -o output -> output prefix
             if (!strcmp(argv[i],"-o")) {
                 fname_prefix = string(argv[++i]);
             } else
+            // -g groupsfile -> groups definition input file
             if (!strcmp(argv[i],"-g")) {
                 fname_groups = argv[++i];
                 groupsf.open(fname_groups, ifstream::in);
@@ -126,11 +128,16 @@ int main(int argc, char *argv[]){
                     return 1;
                 }
                 printf("Using groups file: %s\n", fname_groups);
+            } else
+            // -r resname or --reference resname -> reference molecule name
+            if (!strcmp(argv[i],"--reference") || !strcmp(argv[i], "-r")) {
+                reference_name = argv[++i];
             } else {
                 printf("Unrecognized option: %s\nExiting.\n", argv[i]);
                 return 1;
             }
         } else {
+            // Input PDB file
             input_name = argv[i];
             input.open(input_name, ifstream::in);
             if (!input){
@@ -146,11 +153,40 @@ int main(int argc, char *argv[]){
         print_help();
         return 1;
     }
-    
+
+    if (reference_name == ""){
+        printf("Reference molecule: ");
+        cin >> reference_name;
+    }
+
     string filename_str(input_name);
-    if (fname_prefix=="")
+    if (fname_prefix == "")
         fname_prefix = string(filename_str.begin(), filename_str.end()-4);
-    
+
+    if (max_dist>0) printf("Output distances < %.3lf ", max_dist);
+    else printf("Output all distances ");
+
+    if (begin>0 || end>=0){
+        if (end>=begin)
+            printf("from frames %.1f to %.1f\n", begin, end);
+        else if (end>0) {
+            printf("- ERROR\nBegining frame (-b) must be greater or equal then end \
+frame (-e).\n");
+            printf("Exiting.\n");
+            return(1);
+        } else 
+            printf("starting from frame %.1f\n", begin);
+    } else
+        printf("from all frames.\n");
+
+
+    //-----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------
+
+
+    //-----------------------------------------------------------------------------
+    // Groups file read
+    //-----------------------------------------------------------------------------
     map < string, FILE * > output_grp_stat;
     stringstream gline_stream;
     if (groupsf){
@@ -163,10 +199,10 @@ int main(int argc, char *argv[]){
             gline_stream.clear();
             gline_stream << gline_string;
             if (gline_string[0] == '[') {
-                gline_stream >> word;     //garbage
+                gline_stream >> word;     //garbage (']')
                 gline_stream >> rname;    //residue name
                 
-                string output_stat_grp_name = fname_prefix+"_H-dist_"+rname+"_AVG_GRP.dat";
+                string output_stat_grp_name = fname_prefix+"_H-dist_"+rname+"_GROUP.dat";
                 output_grp_stat[rname]=fopen(output_stat_grp_name.c_str(), "w");
                 printf("Opening %s for writing groups statistics...\n", output_stat_grp_name.c_str());
 
@@ -179,72 +215,43 @@ int main(int argc, char *argv[]){
 
                 getline(groupsf,gline_string);
                 gline_stream << gline_string;
-                tipos[rname] = map<string,int>();
+                types[rname] = map<string,int>();
                 gnumber=0;
             }
-            //gline_stream >> gnumber;    //group label
             gline_stream >> gname;    //group label
 
-            tipos[rname][gname]=++gnumber;
+            types[rname][gname]=++gnumber;
 
             while (gline_stream >> aname) {//atom name
                 groups[rname][aname] = gname;
             }
-        }/*
-        for(map< string, map< string, int > >::iterator it = tipos.begin(); it!=tipos.end(); it++){
-            cout << it->first << endl;
-            for(map< string, int >::iterator it2 = it->second.begin(); it2!=it->second.end(); it2++){
-                cout << it2->first << " " << it2->second << endl;
-            }
-        }*/
-    }
-    /*
-    for(map< string, map< string, pair< string, int > > >::iterator it1 = groups.begin(); it1!=groups.end(); it1++){
-        cout << it1->first << endl;
-        for(map< string, pair< string,int > >::iterator it2 = (it1->second).begin(); it2!=(it1->second).end(); it2++){
-            cout << it2->first << ": " << (it2->second).first << endl;
         }
-        cout<< endl;
     }
-    */
+    //-----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------
 
-    if (max_dist>0) printf("Output distances < %.3lf ", max_dist);
-    else printf("Output all distances ");
-
-    if (begin>0 || end>=0){
-        if (end>=begin)
-            printf("from frames %.1f to %.1f\n", begin, end);
-        else if (end>0) {
-            printf("- ERROR\nBegining frame (-b) must be greater or equal then end frame (-e).\n");
-            printf("Exiting.\n");
-            return(1);
-        } else 
-            printf("starting from frame %.1f\n", begin);
-    } else
-        printf("from all frames.\n");
-
-    vector < FILE * > output;
-    vector < FILE * > output_stat;
-
-    int n_of_args = 7;
+    vector < FILE * > output, output_stat;
 
     bool skip=false, finish=false;
 
+    //----------------------------------------------------------------------------
+    // File read section - Specific for PDB format, with strict text formatation.
+    //----------------------------------------------------------------------------
     line_string="";
     while(getline(input,line_string)){
+
+
         stringstream line_stream(line_string);
         string var, word;
         line_stream >> var;
             
-       // cout << "reading input" << endl;
-       // cout << "var " << var << endl;
+        if(var!="TITLE") continue;  //Searches line contaning "t = x"
         
-        if(var!="TITLE") continue;
-        
+        //Decides whether to consider the frame or not, or terminate
+        //the read
         while(line_stream >> word){
             if (word=="t="){
                 line_stream >> t;
-               // cout << "reading t = " << t << endl;
                 if (end>=0 && t>end) finish=true;
                 if (t<begin) skip=true;
                 else skip=false;
@@ -256,101 +263,86 @@ int main(int argc, char *argv[]){
         
         frames++;
 
-        //cout << "reading atom" << endl;
         while(var!="ATOM") {
+            //Clear stream (fixed an undefined behaviour)---
             line_string="";
             getline(input,line_string,'\n');
-            //cout<< line_string << endl;
             line_stream.str("");
             line_stream.clear();
+            //----------------------------------------------
             line_stream << line_string;
             line_stream >> var;
-            //cout << "var " << var << endl;
         }
-        //cout << "readed" << endl;
         
-        bcd.clear();
-        bcd_count=0;
+        reference.clear();
+        reference_count=0;
         for(int j=0; j<atoms.size(); j++){
             atoms[j].clear();
-            //other_count[j]=0;
         }
 
-        if (first_run) printf("Output files:\n");
+        if (first_frame) printf("Output files:\n");
 
         while(var=="ATOM"){
             string name(line_string.begin()+13, line_string.begin()+17);
-            //cout << line_string << endl;
-            if (name[0]=='H'){
-                string res(line_string.begin()+17, line_string.begin()+21);
+            string res(line_string.begin()+17, line_string.begin()+21);
 
-                //remove(name.begin(), name.end(), ' ');
-                //remove(res.begin(), res.end(), ' ');
-                
-                double x, y, z;
-                string real_str(line_string.begin()+32, line_string.begin()+39);
-                stringstream real(real_str);
-                real >> x;
-                real.str(string());
-                real.clear();
+            double x, y, z;
+            string real_str(line_string.begin()+32, line_string.begin()+39);
+            stringstream real(real_str);
+            real >> x;
+            real.str(string());
+            real.clear();
 
-                real_str = string(line_string.begin()+40, line_string.begin()+47);
-                real << real_str;
-                real >> y;
-                real.str(string());
-                real.clear();
+            real_str = string(line_string.begin()+40, line_string.begin()+47);
+            real << real_str;
+            real >> y;
+            real.str(string());
+            real.clear();
 
-                real_str = string(line_string.begin()+48, line_string.begin()+55);
-                real << real_str;
-                real >> z;
+            real_str = string(line_string.begin()+48, line_string.begin()+55);
+            real << real_str;
+            real >> z;
+            real.str(string());
+            real.clear();
+            
+            struct atom atm;
+            atm.name = rtrim(name);
+            atm.res = rtrim(res);
+            atm.x = x;
+            atm.y = y;
+            atm.z = z;
 
-                real.str(string());
-                real.clear();
-                
-                struct atom atm;
-                atm.name = rtrim(name);
-                atm.res = rtrim(res);
-                atm.x = x;
-                atm.y = y;
-                atm.z = z;
+            if (res==reference_name) {
+                reference.push_back(atm);
+                if (first_frame) reference_count++;
 
-                //cout<<"res "<<res<<endl;
-                if (res=="F6NH") {
-                    bcd.push_back(atm);
+            } else {
+                if (rn.find(res)==rn.end()){    //se foi encontrado novo residuo
+                    distances.resize(distances.size()+1);
 
-                    if (first_run) bcd_count++;
-                    //cout << "bcd atoms " << bcd_count << endl;
-                } else {
-                    if (rn.find(res)==rn.end()){    //se foi encontrado novo residuo
-                        statistics.resize(statistics.size()+1);
+                    rn[res]=atoms.size();
+                    if (first_frame) other_count.resize(rn[res]+1,0);
+                    atoms.resize(rn[res]+1);
+                    if(all){
+                        string output_name = fname_prefix+"_dist_"+res+".dat";
+                        output.push_back(fopen(output_name.c_str(), "w"));
+                        
+                        printf("\t%s\n", output_name.c_str());
 
-                        rn[res]=atoms.size();
-                        if (first_run) other_count.resize(rn[res]+1,0);
-                        //cout << "rn[" << res << "] = " << rn[res] << endl;
-                        //cout << "other count size " << other_count.size() <<endl;
-                        //cout << "other count[i] = " << other_count.size() <<endl;
-                        atoms.resize(rn[res]+1);
-                        if(!avg_only){
-                            string output_name = fname_prefix+"_H-dist_"+res+".dat";
-                            output.push_back(fopen(output_name.c_str(), "w"));
-                            
-                            printf("\t%s\n", output_name.c_str());
-
-                            fprintf(output[rn[res]], "T     F6NH atom %s atom     Distance\n", res.c_str());
-                        }
-                        string output_stat_name = fname_prefix+"_H-dist_"+res+"_AVG.dat";
-                        output_stat.push_back(fopen(output_stat_name.c_str(), "w"));
-
-                        printf("\t%s\n", output_stat_name.c_str());
-
-                        fprintf(output_stat[rn[res]], " Id1   Label1  Id2   Label2     Dist     Sigma  Frequency\n");
-
+                        fprintf(output[rn[res]], "Time   %s   atom  %s  atom     Dist\n", \
+                            reference_name.c_str(), res.c_str());
                     }
-                    atoms[rn[res]].push_back(atm);
-                    if (first_run) other_count[rn[res]]++;
-                    //cout << "res " << res << " other count " << other_count[rn[res]] << endl;
+                    string output_stat_name=fname_prefix+"_dist_"+res+"_AVG.dat";
+                    output_stat.push_back(fopen(output_stat_name.c_str(), "w"));
+
+                    printf("\t%s\n", output_stat_name.c_str());
+
+                    fprintf(output_stat[rn[res]], \
+                        " Id1   Label1  Id2   Label2     Dist     Sigma  Frequency\n");
+
                 }
-                //printf("%.1f   ", t);
+                atoms[rn[res]].push_back(atm);
+                if (first_frame) other_count[rn[res]]++;
             }
             line_string="";
             getline(input,line_string);
@@ -359,122 +351,128 @@ int main(int argc, char *argv[]){
             line_stream << line_string;
             line_stream >> var;
         }
-        if (first_run){
-            printf("%d hydrogens on BCD\n", bcd_count);
+        if (first_frame){
+            printf("%d atoms on %s\n", reference_count, reference_name.c_str());
             for(map<string, int>::iterator it = rn.begin(); it != rn.end(); it++){
-                printf("%d hydrogens on %s\n", other_count[it->second], it->first.c_str());
-                statistics[it->second].resize(bcd_count);
-                //cout << "itsec " << it->second <<endl;
-                for(int i=0; i<bcd_count; i++){
-                    statistics[it->second][i].resize(other_count[it->second]);
-                    //cout << "othercount " << other_count[it->second] <<endl;
+                printf("%d atoms on %s\n", other_count[it->second], it->first.c_str());
+                distances[it->second].resize(reference_count);
+                for(int i=0; i<reference_count; i++){
+                    distances[it->second][i].resize(other_count[it->second]);
                 }
             }
         }
 
         for(int j=0; j<rn.size(); j++){ //residuos
-            for(int i=0; i<bcd.size(); i++){ //atomos da BCD
+            for(int i=0; i<reference.size(); i++){ //atomos da BCD
                 for(int k=0; k<atoms[j].size(); k++){ //atomos do residuo
-                    atom A = bcd[i], B = atoms[j][k];
+                    atom A = reference[i], B = atoms[j][k];
                     double D = dist(A,B);
                     if (max_dist<0 || D<max_dist){
-                        statistics[j][i][k].push_back(D);
-                        if (!avg_only) {
-                            fprintf(output[j], "%-10.1f%4d%5d%5s%5s%8.3lf\n", t, i, k, (bcd[i].name).c_str(), (atoms[j][k].name).c_str(), D);
-                        }
+                        distances[j][i][k].push_back(D);
+                        if (all) 
+                            fprintf(output[j], "%-10.1f%4d%5d%5s%5s%8.3lf\n", \
+                            t, i, k, (A.name).c_str(), (B.name).c_str(), D);
                     }
-
                 }       
             }
         }
-        first_run=false;
+        first_frame=false;
     }
- 
+    //--------------------------------------------------------------------------------
+    //-------------------------------------------------------------------------------
 
+    //----------------------------------------------------------------------------
+    // Distances and statistics calculation, and output.
+    //----------------------------------------------------------------------------
     printf("%d frames analysed\n", frames);
-    printf("Calculating averages and statistics\n");
-    string bcd_grp, res_grp;
+    printf("Calculating averages and distances\n");
+    string reference_grp, res_grp;
     stat data;
     int m=0;
-    for(int i=0; i<statistics.size();i++){
-        for(int j=0; j<statistics[i].size();j++){
-            for(int k=0; k<statistics[i][j].size();k++){
+    for(int i=0; i<distances.size();i++){
+        for(int j=0; j<distances[i].size();j++){
+            for(int k=0; k<distances[i][j].size();k++){
 		string rname=atoms[i][k].res;
 		string aname=atoms[i][k].name;
                 //Group section
                 bool count_this=false;
                 if (groupsf.is_open()){
-                    if(groups.find(rname)!=groups.end() && groups["F6NH"].find(bcd[j].name)!=groups["F6NH"].end()){
+                    if(groups.find(rname)!=groups.end() && \
+                        groups[reference_name].find(reference[j].name)!=groups[reference_name].end()){
                         if(groups[rname].find(aname)!=groups[rname].end()){
-                            //cout<< "found " << rname << " and " << aname <<endl;
-                            bcd_grp = groups["F6NH"][bcd[j].name];
+                            reference_grp = groups[reference_name][reference[j].name];
                             res_grp = groups[rname][aname];
-                            //cout<< "resname " << rname << " resgrp " << res_grp <<endl;
-                            if(groups_stats.find(bcd_grp)==groups_stats.end()){
-                                groups_stats[bcd_grp] = map< string, map< string, stat > >();
-                                groups_stats[bcd_grp][rname] = map< string, stat >();
-                                groups_stats[bcd_grp][rname][res_grp] = stat();
+                            if(groups_stats.find(reference_grp)==groups_stats.end()){
+                                groups_stats[reference_grp] = map< string, map< string, stat > >();
+                                groups_stats[reference_grp][rname] = map< string, stat >();
+                                groups_stats[reference_grp][rname][res_grp] = stat();
                             }
-                            else if (groups_stats[bcd_grp].find(rname)==groups_stats[bcd_grp].end())
-                                groups_stats[bcd_grp][rname] = map< string, stat >();
+                            else if (groups_stats[reference_grp].find(rname)==groups_stats[reference_grp].end())
+                                groups_stats[reference_grp][rname] = map< string, stat >();
 
-                            else if (groups_stats[bcd_grp][rname].find(res_grp)==groups_stats[bcd_grp][rname].end())
-                                groups_stats[bcd_grp][rname][res_grp] = stat();
+                            else if (groups_stats[reference_grp][rname].find(res_grp)==\
+                                groups_stats[reference_grp][rname].end())
+                                groups_stats[reference_grp][rname][res_grp] = stat();
 
-                            data = groups_stats[bcd_grp][rname][res_grp];
+                            data = groups_stats[reference_grp][rname][res_grp];
                             data.res = rname;
                             count_this=true;
                         }
                     }
                 }
                 double avg=0, sum=0;
-                int N = statistics[i][j][k].size();
+                int N = distances[i][j][k].size();
                 //if (N) {
                     ///////////////
                     double d, stddev=0;
                     if (count_this){
                         for(int l=0; l<N;l++){
-                            d = statistics[i][j][k][l];
+                            d = distances[i][j][k][l];
                             sum += d;
 
                             data.data.push_back(d);
                         }
                         data.d_sum += sum;
                         data.n += N;
-                        groups_stats[bcd_grp][rname][res_grp] = data;
-                        //cout << " res name " << rname << " res group " << res_grp << endl;
+                        groups_stats[reference_grp][rname][res_grp] = data;
 
                     } else
                         for(int l=0; l<N;l++){
-                            d = statistics[i][j][k][l];
+                            d = distances[i][j][k][l];
                             sum += d;
                         }
 
                 if (N){
                     avg = sum/N;
                     for(int l=0; l<N; l++){
-                        d = statistics[i][j][k][l];
+                        d = distances[i][j][k][l];
                         stddev += (d-avg)*(d-avg);
                     }
                     stddev = sqrt(stddev/(double)N);
-                    fprintf(output_stat[i], "%4d %8s %4d %8s %8.3lf %9.3lf %10d\n", j, bcd[j].name.c_str(), k, atoms[i][k].name.c_str(), avg, stddev, N);
+                    fprintf(output_stat[i], "%4d %8s %4d %8s %8.3lf %9.3lf %10d\n",\
+                    j, reference[j].name.c_str(), k, atoms[i][k].name.c_str(), avg, stddev, N);
 
                 }
             }
         }
     }
+    //----------------------------------------------------------------------------
+    //----------------------------------------------------------------------------
 
-    for(map<string, FILE*>::iterator it = output_grp_stat.begin(); it!=output_grp_stat.end(); it++){
+    for(map<string, FILE*>::iterator it = output_grp_stat.begin(); \
+        it!=output_grp_stat.end(); it++){
         fprintf(it->second, " Id1   Label1  Id2   Label2     Dist     Sigma  Frequency\n");
     }
 
     int ni=0, nj=0;
     if (groupsf.is_open()){
-        for(map< string, map< string, map< string, stat > > >::iterator bcd_it = groups_stats.begin(); bcd_it!=groups_stats.end(); bcd_it++){
-	    ni=tipos["F6NH"][bcd_it->first];
-            for(map< string, map< string, stat > >::iterator res_n = (bcd_it->second).begin(); res_n!=(bcd_it->second).end(); res_n++){
-                for(map< string, stat >::iterator res_it = (res_n->second).begin(); res_it!=(res_n->second).end(); res_it++){
-                    //cout << "res first " << res_it->first << "res sec " << res_it->second  << endl;
+        for(map< string, map< string, map< string, stat > > >::iterator reference_it = groups_stats.begin();\
+            reference_it!=groups_stats.end(); reference_it++){
+	    ni=types[reference_name][reference_it->first];
+            for(map< string, map< string, stat > >::iterator res_n = (reference_it->second).begin(); \
+                res_n!=(reference_it->second).end(); res_n++){
+                for(map< string, stat >::iterator res_it = (res_n->second).begin(); \
+                    res_it!=(res_n->second).end(); res_it++){
                     
                     int n = (res_it->second).n;
                     double d_sum = (res_it->second).d_sum;
@@ -490,8 +488,9 @@ int main(int argc, char *argv[]){
                         }
                         stddev = sqrt(stddev/(double)n);
                     }
-                    nj=tipos[rname][res_it->first];
-                    fprintf(output_grp_stat[rname], "%4d %8s %4d %8s %8.3lf %9.3lf %10d\n", ni, bcd_it->first.c_str(), nj, res_it->first.c_str(), avg, stddev, n);
+                    nj=types[rname][res_it->first];
+                    fprintf(output_grp_stat[rname], "%4d %8s %4d %8s %8.3lf %9.3lf %10d\n", \
+                        ni, reference_it->first.c_str(), nj, res_it->first.c_str(), avg, stddev, n);
                 }
             }
         }
@@ -499,7 +498,7 @@ int main(int argc, char *argv[]){
 
 
     for(int i=0; i<output_stat.size(); i++){
-        if (!avg_only) fclose(output[i]);
+        if (all) fclose(output[i]);
         fclose(output_stat[i]);
     }
     for(map< string, FILE * >::iterator it=output_grp_stat.begin(); it!=output_grp_stat.end(); it++){
