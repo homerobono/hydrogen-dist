@@ -49,11 +49,18 @@ typedef struct vec {
         z += v.z;
         return *this;
     }
-    vec& operator*(const vec& v){
-        x *= v.x;
-        y *= v.y;
-        z *= v.z;
-        return *this;
+    //double operator x(const vec& v){
+    //    x *= v.x;
+    //    y *= v.y;
+    //    z *= v.z;
+    //    return x+y+z;
+    //}
+    vec operator *(const vec& v){
+        vec cp;
+        cp.x = y*v.z-z*v.y;
+        cp.y = z*v.x-x*v.z;
+        cp.z = x*v.y-y*v.x;
+        return cp;
     }
 } vec;
 
@@ -238,7 +245,14 @@ double calculate_dihedral(vector <atom*> dih){
     
     vec vec1 = vec(matprodarray(M, (A.vector()).array(4)));
     vec vec2 = vec(matprodarray(M, (D.vector()).array(4)));
-    return calculate_angle(vec1, vec2);
+    
+    double Angle = calculate_angle(vec1, vec2);
+    vec CrossProd = vec1*vec2;
+    double signal = -CrossProd.z/fabs(CrossProd.z);
+    //double Angle2 = asin( modulo(CrossProduct)/modulo(vec1)/modulo(vec2) );
+    //if (Angle2 < 0) cout << Angle2 << endl;
+
+    return signal * Angle;
 }
 
 //Print basic help with usage samples
@@ -826,7 +840,7 @@ frame (-e).\n");
                 angles[ang].push_back(Angle);
             //}
             //if (all) 
-                fprintf(output_angle, "%-10.1f%-4d%6s%6s  %-4d%6s%6s  %-4d%6s%6s%8.3f\n", t, \
+                fprintf(output_angle, "%-10.1f%-4d%6s%6s  %-4d%6s%6s  %-4d%6s%6s%8.5f\n", t, \
                 AngleAtoms[ang][0]->n, AngleAtoms[ang][0]->res.c_str(), AngleAtoms[ang][0]->name.c_str(),\
                 AngleAtoms[ang][1]->n, AngleAtoms[ang][1]->res.c_str(), AngleAtoms[ang][1]->name.c_str(),\
                 AngleAtoms[ang][2]->n, AngleAtoms[ang][2]->res.c_str(), AngleAtoms[ang][2]->name.c_str(),\
@@ -844,7 +858,7 @@ frame (-e).\n");
                 dihedrals[dih].push_back(Dihedral);
             //}
             //if (all) 
-                fprintf(output_dihedral, "%-10.1f%-4d%6s%6s  %-4d%6s%6s  %-4d%6s%6s  %-4d%6s%6s%8.3f\n", t, \
+                fprintf(output_dihedral, "%-10.1f%-4d%6s%6s  %-4d%6s%6s  %-4d%6s%6s  %-4d%6s%6s%8.5f\n", t, \
                 DihedralAtoms[dih][0]->n, DihedralAtoms[dih][0]->res.c_str(), DihedralAtoms[dih][0]->name.c_str(),\
                 DihedralAtoms[dih][1]->n, DihedralAtoms[dih][1]->res.c_str(), DihedralAtoms[dih][1]->name.c_str(),\
                 DihedralAtoms[dih][2]->n, DihedralAtoms[dih][2]->res.c_str(), DihedralAtoms[dih][2]->name.c_str(),\
@@ -991,7 +1005,7 @@ frame (-e).\n");
                 stddev += (avg-anglevalue)*(avg-anglevalue);
             }
             stddev = sqrt(stddev/(double)n);
-            fprintf(output_stat["angle"], "%4d %6s %6s %4d %6s %6s %4d %6s %6s %8.3lf %9.3lf %7d\n", \
+            fprintf(output_stat["angle"], "%4d %6s %6s %4d %6s %6s %4d %6s %6s %8.5lf %9.3lf %7d\n", \
                 AngleAtoms[ang][0]->n, AngleAtoms[ang][0]->res.c_str(), AngleAtoms[ang][0]->name.c_str(),\
                 AngleAtoms[ang][1]->n, AngleAtoms[ang][1]->res.c_str(), AngleAtoms[ang][1]->name.c_str(),\
                 AngleAtoms[ang][2]->n, AngleAtoms[ang][2]->res.c_str(), AngleAtoms[ang][2]->name.c_str(),\
@@ -1024,7 +1038,7 @@ frame (-e).\n");
                 stddev += (avg-dihedralvalue)*(avg-dihedralvalue);
             }
             stddev = sqrt(stddev/(double)n);
-            fprintf(output_stat["dihedral"], "%4d %6s %6s %4d %6s %6s %4d %6s %6s %4d %6s %6s %8.3lf %9.3lf %7d\n", \
+            fprintf(output_stat["dihedral"], "%4d %6s %6s %4d %6s %6s %4d %6s %6s %4d %6s %6s %8.5lf %9.3lf %7d\n", \
                 DihedralAtoms[dih][0]->n, DihedralAtoms[dih][0]->res.c_str(), DihedralAtoms[dih][0]->name.c_str(),\
                 DihedralAtoms[dih][1]->n, DihedralAtoms[dih][1]->res.c_str(), DihedralAtoms[dih][1]->name.c_str(),\
                 DihedralAtoms[dih][2]->n, DihedralAtoms[dih][2]->res.c_str(), DihedralAtoms[dih][2]->name.c_str(),\
